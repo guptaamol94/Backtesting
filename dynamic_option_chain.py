@@ -1,4 +1,8 @@
 import requests
+import numpy as np
+from scipy.stats import norm
+from scipy.optimize import brentq
+from datetime import datetime
 from config import ACCESS_TOKEN
 
 headers = {
@@ -106,3 +110,101 @@ print(f"PCR         : {pcr:.2f}")
 print(f"Sentiment   : {sentiment}")
 print(f"\nResistance (Max CE OI) : {max_ce_oi_strike} ({max_ce_oi})")
 print(f"Support    (Max PE OI) : {max_pe_oi_strike} ({max_pe_oi})")
+
+# ── Step 9: Max Pain Calculator ──────────────────────────
+print("\n" + "=" * 70)
+print("  MAX PAIN CALCULATION")
+print("=" * 70)
+
+max_pain_data = {}
+
+for test_strike in nearby:
+    total_pain = 0
+    for strike in nearby:
+        if strike in calls:
+            ce_info = get_info(calls[strike]['instrument_key'])
+            ce_oi   = ce_info['oi'] if ce_info else 0
+            if test_strike > strike:
+                total_pain += (test_strike - strike) * ce_oi
+        if strike in puts:
+            pe_info = get_info(puts[strike]['instrument_key'])
+            pe_oi   = pe_info['oi'] if pe_info else 0
+            if test_strike < strike:
+                total_pain += (strike - test_strike) * pe_oi
+    max_pain_data[test_strike] = total_pain
+
+max_pain_strike = min(max_pain_data, key=max_pain_data.get)
+
+print(f"\n{'Strike':>8} | {'Total Pain':>15}")
+print("-" * 30)
+for strike, pain in max_pain_data.items():
+    tag = " <- MAX PAIN" if strike == max_pain_strike else ""
+    print(f"{strike:>8.0f} | {pain:>15,.0f}{tag}")
+
+print("=" * 70)
+print(f"\nMax Pain Strike : {max_pain_strike}")
+print(f"Current Spot    : {spot}")
+
+distance     = spot - max_pain_strike
+distance_pct = (distance / spot) * 100
+
+print(f"Distance        : {distance:.0f} points ({distance_pct:+.2f}%)")
+
+if distance_pct > 1:
+    print("Signal          : Spot Max Pain se UPAR — neeche pull possible")
+elif distance_pct < -1:
+    print("Signal          : Spot Max Pain se NEECHE — upar push possible")
+else:
+    print("Signal          : Spot Max Pain ke PAAS — range bound likely")
+
+# ── Step 10: IV Calculator (Black-Scholes) ───────────────
+print("\n" + "=" * 70)
+print("  IMPLIED VOLATILITY (IV)")
+print("=" * 70)
+
+expiry_date = datetime.strptime(EXPIRY, "%Y-%m-%d")
+today       = datetime.now()
+T = (expiry_date - today).days / 365
+if T <= 0:
+    T = 1/365
+
+R = 0.065
+
+def bs_price(S, K, T, r, sigma, option_type):
+    d1 = (np.log(S/K) + (r + sigma**2/2)*T) / (sigma*np.sqrt(T))
+    d2 = d1 - sigma*np.sqrt(T)
+    if option_type == 'CE':
+        return S*norm.cdf(d1) - K*np.exp(-r*T)*norm.cdf(d2)
+    else:
+        return K*np.exp(-r*T)*norm.cdf(-d2) - S*norm.cdf(-d1)
+
+def calculate_iv(market_price, S, K, T, r, option_type):
+    if market_price <= 0:
+        return 0
+    try:
+        iv = brentq(
+            lambda sigma: bs_price(S, K, T, r, sigma, option_type) - market_price,
+            0.001, 5.0
+        )
+        return iv * 100
+    except:
+        return 0
+
+print(f"\nTime to Expiry  : {T*365:.1f} days")
+print(f"\n{'Strike':>8} | {'CE LTP':>8} | {'CE IV%':>8} | {'PE LTP':>8} | {'PE IV%':>8}")
+print("-" * 70)
+
+for strike in nearby:
+    ce_info = get_info(calls[strike]['instrument_key']) if strike in calls else None
+    pe_info = get_info(puts[strike]['instrument_key'])  if strike in puts  else None
+
+    ce_ltp = ce_info['last_price'] if ce_info else 0
+    pe_ltp = pe_info['last_price'] if pe_info else 0
+
+    ce_iv = calculate_iv(ce_ltp, spot, strike, T, R, 'CE') if ce_ltp > 0 else 0
+    pe_iv = calculate_iv(pe_ltp, spot, strike, T, R, 'PE') if pe_ltp > 0 else 0
+
+    atm_tag = " <- ATM" if strike == atm_strike else ""
+    print(f"{strike:>8.0f} | {ce_ltp:>8} | {ce_iv:>7.1f}% | {pe_ltp:>8} | {pe_iv:>7.1f}%{atm_tag}")
+
+print("=" * 70)
