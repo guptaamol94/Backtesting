@@ -208,3 +208,68 @@ for strike in nearby:
     print(f"{strike:>8.0f} | {ce_ltp:>8} | {ce_iv:>7.1f}% | {pe_ltp:>8} | {pe_iv:>7.1f}%{atm_tag}")
 
 print("=" * 70)
+# ── Step 11: Greeks Calculator ───────────────────────────
+print("\n" + "=" * 70)
+print("  GREEKS — Delta, Gamma, Theta, Vega")
+print("=" * 70)
+
+def calculate_greeks(S, K, T, r, sigma, option_type):
+    """Calculate Delta, Gamma, Theta, Vega"""
+    if sigma <= 0 or T <= 0:
+        return 0, 0, 0, 0
+
+    d1 = (np.log(S/K) + (r + sigma**2/2)*T) / (sigma*np.sqrt(T))
+    d2 = d1 - sigma*np.sqrt(T)
+
+    # Delta
+    if option_type == 'CE':
+        delta = norm.cdf(d1)
+    else:
+        delta = norm.cdf(d1) - 1
+
+    # Gamma — dono ke liye same hota hai
+    gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+
+    # Theta — per day decay
+    if option_type == 'CE':
+        theta = (-S*norm.pdf(d1)*sigma/(2*np.sqrt(T)) 
+                 - r*K*np.exp(-r*T)*norm.cdf(d2)) / 365
+    else:
+        theta = (-S*norm.pdf(d1)*sigma/(2*np.sqrt(T)) 
+                 + r*K*np.exp(-r*T)*norm.cdf(-d2)) / 365
+
+    # Vega — per 1% IV change
+    vega = S * norm.pdf(d1) * np.sqrt(T) / 100
+
+    return delta, gamma, theta, vega
+
+print(f"\n{'Strike':>8} | {'Type':>4} | {'Delta':>7} | {'Gamma':>7} | {'Theta':>8} | {'Vega':>6}")
+print("-" * 70)
+
+for strike in nearby:
+    ce_info = get_info(calls[strike]['instrument_key']) if strike in calls else None
+    pe_info = get_info(puts[strike]['instrument_key'])  if strike in puts  else None
+
+    ce_ltp = ce_info['last_price'] if ce_info else 0
+    pe_ltp = pe_info['last_price'] if pe_info else 0
+
+    atm_tag = " <- ATM" if strike == atm_strike else ""
+
+    # CE Greeks
+    if ce_ltp > 0:
+        ce_iv = calculate_iv(ce_ltp, spot, strike, T, R, 'CE') / 100
+        d, g, th, v = calculate_greeks(spot, strike, T, R, ce_iv, 'CE')
+        print(f"{strike:>8.0f} | {'CE':>4} | {d:>7.3f} | {g:>7.5f} | {th:>8.2f} | {v:>6.2f}{atm_tag}")
+
+    # PE Greeks
+    if pe_ltp > 0:
+        pe_iv = calculate_iv(pe_ltp, spot, strike, T, R, 'PE') / 100
+        d, g, th, v = calculate_greeks(spot, strike, T, R, pe_iv, 'PE')
+        print(f"{strike:>8.0f} | {'PE':>4} | {d:>7.3f} | {g:>7.5f} | {th:>8.2f} | {v:>6.2f}")
+
+print("=" * 70)
+print("\nGreeks ka matlab:")
+print("Delta : 1 point Nifty move pe option price kitna change hoga")
+print("Gamma : Delta kitni speed se change hoga")
+print("Theta : Har din kitna time decay (premium loss) hoga")
+print("Vega  : 1% IV change pe option price kitna change hoga")
