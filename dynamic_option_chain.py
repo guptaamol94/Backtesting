@@ -273,3 +273,54 @@ print("Delta : 1 point Nifty move pe option price kitna change hoga")
 print("Gamma : Delta kitni speed se change hoga")
 print("Theta : Har din kitna time decay (premium loss) hoga")
 print("Vega  : 1% IV change pe option price kitna change hoga")
+# ── Step 12: Telegram Alert ───────────────────────────────
+from config import BOT_TOKEN, CHAT_ID
+
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id" : CHAT_ID,
+        "text"    : message,
+        "parse_mode": "HTML"
+    }
+    requests.post(url, data=payload)
+
+# ── Alert Message banao ───────────────────────────────────
+atm_ce_ltp = 0
+atm_pe_ltp = 0
+atm_ce_iv  = 0
+atm_pe_iv  = 0
+
+for strike in nearby:
+    if strike == atm_strike:
+        ce_info = get_info(calls[strike]['instrument_key']) if strike in calls else None
+        pe_info = get_info(puts[strike]['instrument_key'])  if strike in puts  else None
+        atm_ce_ltp = ce_info['last_price'] if ce_info else 0
+        atm_pe_ltp = pe_info['last_price'] if pe_info else 0
+        atm_ce_iv  = calculate_iv(atm_ce_ltp, spot, strike, T, R, 'CE') if atm_ce_ltp > 0 else 0
+        atm_pe_iv  = calculate_iv(atm_pe_ltp, spot, strike, T, R, 'PE') if atm_pe_ltp > 0 else 0
+
+message = f"""
+<b>NIFTY OPTION CHAIN ALERT</b>
+
+<b>Spot       :</b> {spot}
+<b>ATM Strike :</b> {atm_strike}
+<b>Max Pain   :</b> {max_pain_strike}
+<b>Distance   :</b> {distance:.0f} pts ({distance_pct:+.2f}%)
+
+<b>PCR        :</b> {pcr:.2f} — {sentiment}
+<b>Resistance :</b> {max_ce_oi_strike} (OI: {max_ce_oi})
+<b>Support    :</b> {max_pe_oi_strike} (OI: {max_pe_oi})
+
+<b>ATM CE LTP :</b> {atm_ce_ltp} | IV: {atm_ce_iv:.1f}%
+<b>ATM PE LTP :</b> {atm_pe_ltp} | IV: {atm_pe_iv:.1f}%
+
+<b>Signal     :</b> {
+'Spot Max Pain se UPAR' if distance_pct > 1 
+else 'Spot Max Pain se NEECHE' if distance_pct < -1 
+else 'Max Pain ke PAAS — Range Bound'
+}
+"""
+
+send_telegram(message)
+print("\nTelegram Alert bheja gaya! Check karo apna Telegram!")
